@@ -1,4 +1,7 @@
 streamlit>=1.30.0
 pandas>=2.0.0
+numpy>=1.24.0
 plotly>=5.18.0
 groq>=1.0.0
+# 임베딩(RAG) 기능용 - 미설치 시 키워드 매칭으로 자동 폴백됩니다.
+sentence-transformers>=2.2.0

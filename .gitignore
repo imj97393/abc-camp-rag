@@ -60,6 +60,9 @@ Thumbs.db
 ehthumbs.db
 Desktop.ini
 
+# Streamlit 시크릿 (실제 키는 커밋 금지, example 파일만 커밋)
+.streamlit/secrets.toml
+
 # 기타
 *.log
 *.tmp

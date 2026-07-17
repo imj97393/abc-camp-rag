@@ -115,6 +115,29 @@ python src/create_excel_dashboard.py
 node create_ppt.js
 ```
 
+## 챗봇 (RAG) 및 배포
+
+### 임베딩 파일 생성
+
+의미 기반(semantic) 검색을 위해 임베딩 파일을 생성합니다.
+
+```bash
+python src/build_embeddings.py
+# 결과: data/yes24_embeddings.npz
+```
+
+- 생성된 `.npz` 파일은 앱 실행 시 자동 로드되며, 사이드바에서 직접 업로드할 수도 있습니다.
+- `sentence-transformers`가 없거나 임베딩 파일이 없으면 자동으로 키워드 매칭으로 폴백됩니다.
+
+### 배포 환경에서 챗봇 사용
+
+배포된 앱에서 사용자가 API 키를 매번 입력하지 않도록, `st.secrets` 또는 환경변수로 키를 주입할 수 있습니다.
+
+- Streamlit Cloud: 앱 Secrets에 `GROQ_API_KEY` 등록
+- 로컬: `.streamlit/secrets.toml`에 등록 (`.streamlit/secrets.toml.example` 참고)
+
+API Key 우선순위: **사이드바 입력 → `st.secrets` → 환경변수(`GROQ_API_KEY`)**
+
 ## 라이선스
 
 이 프로젝트는 학습 및 연구 목적으로 제작되었습니다.

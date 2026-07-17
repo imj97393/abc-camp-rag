@@ -1,9 +1,12 @@
 import json
+import os
 import re
 
 import pandas as pd
 import streamlit as st
 from groq import Groq
+
+from components.embeddings import load_embeddings, semantic_search
 
 
 SYSTEM_PROMPT = """당신은 Yes24 IT 모바일 베스트셀러 도서 추천 어시스턴트입니다.
@@ -189,24 +192,45 @@ def _exec_sales_index_statistics(df: pd.DataFrame, sort_by: str = "index_desc", 
     return stats
 
 
-def _build_book_context(df: pd.DataFrame, query: str, max_items: int = 30) -> str:
+def _rows_from_ids(df: pd.DataFrame, ids: list, max_items: int) -> pd.DataFrame:
+    order = {rid: i for i, rid in enumerate(ids)}
+    subset = df[df["순위"].astype(int).isin(order.keys())].copy()
+    if subset.empty:
+        return subset
+    subset["_rank_order"] = subset["순위"].astype(int).map(order)
+    subset = subset.sort_values("_rank_order").head(max_items)
+    return subset.drop(columns=["_rank_order"])
+
+
+def _build_book_context(df: pd.DataFrame, query: str, max_items: int = 30, store=None) -> str:
     if df.empty:
         return ""
 
-    keywords = re.findall(r"[\w가-힣]+", query.lower())
-    if not keywords:
-        top = df.head(max_items)
-    else:
-        mask = pd.Series([False] * len(df))
-        for kw in keywords:
-            mask |= df["제목"].str.contains(kw, case=False, na=False)
-            mask |= df["저자"].str.contains(kw, case=False, na=False)
-            mask |= df["출판사"].str.contains(kw, case=False, na=False)
-        matched = df[mask]
-        if matched.empty:
+    top = None
+
+    if store is not None:
+        results = semantic_search(store, query, top_k=max_items)
+        if results:
+            ids = [rid for rid, _ in results]
+            top = _rows_from_ids(df, ids, max_items)
+            if top.empty:
+                top = None
+
+    if top is None:
+        keywords = re.findall(r"[\w가-힣]+", query.lower())
+        if not keywords:
             top = df.head(max_items)
         else:
-            top = matched.head(max_items)
+            mask = pd.Series([False] * len(df))
+            for kw in keywords:
+                mask |= df["제목"].str.contains(kw, case=False, na=False)
+                mask |= df["저자"].str.contains(kw, case=False, na=False)
+                mask |= df["출판사"].str.contains(kw, case=False, na=False)
+            matched = df[mask]
+            if matched.empty:
+                top = df.head(max_items)
+            else:
+                top = matched.head(max_items)
 
     lines = []
     for _, row in top.iterrows():
@@ -241,8 +265,8 @@ def _execute_tool(name: str, arguments: dict, df: pd.DataFrame) -> str:
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-def chat_with_groq(client: Groq, df: pd.DataFrame, query: str, model: str) -> str:
-    context = _build_book_context(df, query)
+def chat_with_groq(client: Groq, df: pd.DataFrame, query: str, model: str, store=None) -> str:
+    context = _build_book_context(df, query, store=store)
 
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -307,17 +331,46 @@ def render_chat_message(role: str, content: str):
         st.markdown(content, unsafe_allow_html=True)
 
 
+def _resolve_api_key(user_input: str) -> str:
+    """API 키 우선순위: 사용자 입력 -> st.secrets -> 환경변수.
+
+    배포 환경에서 secrets/환경변수로 키를 주입하면 사용자가 직접 입력하지 않아도
+    챗봇을 사용할 수 있습니다.
+    """
+    if user_input and user_input.strip():
+        return user_input.strip()
+    try:
+        secret_key = st.secrets.get("GROQ_API_KEY", "")
+        if secret_key:
+            return str(secret_key).strip()
+    except Exception:
+        pass
+    return os.environ.get("GROQ_API_KEY", "").strip()
+
+
+@st.cache_resource
+def _get_default_store():
+    return load_embeddings()
+
+
+def _load_uploaded_store(uploaded_file):
+    if uploaded_file is None:
+        return None
+    return load_embeddings(uploaded_file)
+
+
 def page_chatbot(df: pd.DataFrame):
     st.header("📚 도서 추천 챗봇")
 
     with st.sidebar:
         st.markdown("---")
         st.subheader("⚙️ 챗봇 설정")
-        api_key = st.text_input(
+        api_key_input = st.text_input(
             "Groq API Key",
             type="password",
-            placeholder="gsk_...",
-            help="https://console.groq.com 에서 API Key를 발급받으세요.",
+            placeholder="gsk_... (배포 secrets 설정 시 생략 가능)",
+            help="https://console.groq.com 에서 API Key를 발급받으세요. "
+            "배포 환경에서는 secrets(GROQ_API_KEY)로 자동 주입됩니다.",
         )
         model = st.selectbox(
             "모델 선택",
@@ -330,13 +383,35 @@ def page_chatbot(df: pd.DataFrame):
             index=0,
         )
 
+        st.markdown("---")
+        st.subheader("🧠 임베딩 (RAG)")
+        uploaded_embedding = st.file_uploader(
+            "임베딩 파일 업로드 (.npz)",
+            type=["npz"],
+            help="build_embeddings.py로 생성한 임베딩 파일을 업로드하면 의미 기반 검색이 활성화됩니다.",
+        )
+
+    api_key = _resolve_api_key(api_key_input)
+
+    if uploaded_embedding is not None:
+        store = _load_uploaded_store(uploaded_embedding)
+    else:
+        store = _get_default_store()
+
+    with st.sidebar:
+        if store is not None:
+            st.success(f"✅ 임베딩 활성 ({store.size:,}건)")
+        else:
+            st.caption("ℹ️ 임베딩 미사용 (키워드 매칭으로 동작)")
+
     if not api_key:
-        st.info("🔑 사이드바에서 Groq API Key를 입력해 주세요.")
+        st.info("🔑 사이드바에서 Groq API Key를 입력하거나, 배포 secrets에 GROQ_API_KEY를 설정해 주세요.")
         st.markdown("""
         ### 사용법
         1. [Groq Console](https://console.groq.com)에서 API Key를 발급받으세요
-        2. 사이드바에 API Key를 입력하세요
-        3. 질문을 입력하면 관련 도서를 추천해 드립니다
+        2. 사이드바에 API Key를 입력하세요 (또는 배포 secrets에 `GROQ_API_KEY` 설정 시 생략 가능)
+        3. (선택) 임베딩 `.npz` 파일을 업로드하면 의미 기반 RAG 검색이 활성화됩니다
+        4. 질문을 입력하면 관련 도서를 추천해 드립니다
 
         **예시 질문:**
         - "AI 관련 책 추천해줘"
@@ -370,7 +445,7 @@ def page_chatbot(df: pd.DataFrame):
     try:
         client = Groq(api_key=api_key)
         with st.spinner("🔍 관련 도서를 검색하고 있습니다..."):
-            response = chat_with_groq(client, df, user_input, model)
+            response = chat_with_groq(client, df, user_input, model, store=store)
     except Exception as e:
         error_msg = f"API 호출 중 오류가 발생했습니다: {str(e)}"
         render_chat_message("assistant", error_msg)
@@ -380,7 +455,7 @@ def page_chatbot(df: pd.DataFrame):
     render_chat_message("assistant", response)
     st.session_state.chat_messages.append({"role": "assistant", "content": response})
 
-    matched = _build_book_context(df, user_input, max_items=5)
+    matched = _build_book_context(df, user_input, max_items=5, store=store)
     if matched:
         with st.expander("🔗 추천 도서 빠른 링크", expanded=False):
             for line in matched.strip().split("\n"):
