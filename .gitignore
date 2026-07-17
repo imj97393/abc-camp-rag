@@ -1,0 +1,67 @@
+# opencode 설정
+.agents/
+
+# 문서 파일 (커밋하지 않음)
+*.xlsx
+*.xls
+*.xlsm
+*.xlsb
+*.xlt
+*.xla
+*.xlk
+*.xlc
+*.xll
+*.pptx
+*.ppt
+*.pptm
+*.pot
+*.potx
+*.pps
+*.ppsx
+*.pps
+*.docx
+*.doc
+*.docm
+*.dot
+*.dotx
+*.pdf
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+ENV/
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+bun.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# 기타
+*.log
+*.tmp
+*.bak
+*.orig
