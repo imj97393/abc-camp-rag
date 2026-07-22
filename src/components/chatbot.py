@@ -402,7 +402,7 @@ def page_chatbot(df: pd.DataFrame):
         if store is not None:
             st.success(f"✅ 임베딩 활성 ({store.size:,}건)")
         else:
-            st.caption("ℹ️ 임베딩 미사용 (키워드 매칭으로 동작)")
+            st.warning("⚠️ 임베딩 미활성 (sentence-transformers 미설치 또는 데이터 없음)")
 
     if not api_key:
         st.info("🔑 사이드바에서 Groq API Key를 입력하거나, 배포 secrets에 GROQ_API_KEY를 설정해 주세요.")

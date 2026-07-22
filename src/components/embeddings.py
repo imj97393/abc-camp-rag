@@ -1,7 +1,8 @@
 """임베딩(.npz) 파일 로딩 및 의미 기반(코사인 유사도) 검색 유틸리티.
 
 - 로컬 경로 또는 Streamlit 업로드 파일 객체 모두 지원합니다.
-- sentence-transformers 미설치 또는 임베딩 미제공 시 graceful 하게 None 을 반환하여
+- .npz 파일이 없으면 CSV 데이터로부터 자동으로 임베딩을 생성합니다.
+- sentence-transformers 미설치 시 graceful 하게 None 을 반환하여
   챗봇이 기존 키워드 매칭으로 폴백할 수 있도록 합니다.
 """
 
@@ -12,6 +13,8 @@ import numpy as np
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
 DEFAULT_EMBEDDING_PATH = os.path.join(DATA_DIR, "yes24_embeddings.npz")
+CSV_PATH = os.path.join(DATA_DIR, "yes24_it_mobile_bestseller.csv")
+DEFAULT_MODEL = "paraphrase-multilingual-MiniLM-L12-v2"
 
 
 @dataclass
@@ -26,11 +29,58 @@ class EmbeddingStore:
         return int(self.vectors.shape[0])
 
 
+def _build_embeddings_from_csv() -> "EmbeddingStore | None":
+    """CSV 데이터로부터 임베딩을 생성하고 .npz 파일로 저장합니다."""
+    try:
+        import pandas as pd
+    except ImportError:
+        return None
+
+    try:
+        from sentence_transformers import SentenceTransformer
+    except ImportError:
+        return None
+
+    if not os.path.exists(CSV_PATH):
+        return None
+
+    try:
+        df = pd.read_csv(CSV_PATH, encoding="utf-8-sig")
+        texts = (
+            df["제목"].fillna("") + " " + df["저자"].fillna("") + " " + df["출판사"].fillna("")
+        ).str.strip().tolist()
+        ids = df["순위"].astype(int).tolist()
+
+        model = SentenceTransformer(DEFAULT_MODEL)
+        vectors = model.encode(
+            texts, batch_size=64, show_progress_bar=False, normalize_embeddings=True
+        ).astype(np.float32)
+
+        os.makedirs(os.path.dirname(DEFAULT_EMBEDDING_PATH), exist_ok=True)
+        np.savez_compressed(
+            DEFAULT_EMBEDDING_PATH,
+            vectors=vectors,
+            ids=np.array(ids, dtype=np.int64),
+            texts=np.array(texts, dtype=object),
+            model=np.array(DEFAULT_MODEL),
+        )
+
+        return EmbeddingStore(
+            vectors=vectors,
+            ids=np.array(ids, dtype=np.int64),
+            texts=np.array(texts, dtype=object),
+            model=DEFAULT_MODEL,
+        )
+    except Exception:
+        return None
+
+
 def load_embeddings(source=None) -> "EmbeddingStore | None":
     """임베딩 파일을 로드합니다.
 
     source:
-        - None: 기본 경로(data/yes24_embeddings.npz) 사용
+        - None: 기본 경로(data/yes24_embeddings.npz) 사용.
+                 파일이 없으면 CSV로부터 자동 생성을 시도합니다.
         - str: 파일 경로
         - file-like: Streamlit UploadedFile 등
     로드 실패 시 None 반환.
@@ -38,7 +88,7 @@ def load_embeddings(source=None) -> "EmbeddingStore | None":
     try:
         if source is None:
             if not os.path.exists(DEFAULT_EMBEDDING_PATH):
-                return None
+                return _build_embeddings_from_csv()
             source = DEFAULT_EMBEDDING_PATH
 
         data = np.load(source, allow_pickle=True)
